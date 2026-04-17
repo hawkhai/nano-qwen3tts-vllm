@@ -28,6 +28,7 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -36,6 +37,52 @@ import soundfile as sf
 
 sys.path.append(".")
 from nano_qwen3tts_vllm.interface import Qwen3TTSInterface
+
+
+REQUIRED_MODEL_DOWNLOADS = [
+    (
+        "Qwen/Qwen3-TTS-Tokenizer-12Hz",
+        "Qwen3-TTS-Tokenizer-12Hz",
+    ),
+    (
+        "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+        "Qwen3-TTS-12Hz-0.6B-Base",
+    ),
+    (
+        "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    ),
+]
+
+
+def ensure_required_models(base_dir: Path) -> None:
+    """Download required models via ModelScope if they are missing locally."""
+
+    for model_id, relative_dir in REQUIRED_MODEL_DOWNLOADS:
+        target_dir = base_dir / relative_dir
+        if target_dir.is_dir() and any(target_dir.iterdir()):
+            continue
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            "-m",
+            "modelscope",
+            "download",
+            "--model",
+            model_id,
+            "--local_dir",
+            str(target_dir),
+        ]
+
+        print(f"Missing model '{model_id}'. Downloading to {target_dir} via ModelScope...")
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                "ModelScope download failed. Ensure `pip install modelscope` is executed "
+                "and the command can access the internet."
+            ) from exc
 
 
 def main():
@@ -90,7 +137,11 @@ def main():
     print("=" * 60)
     print("Custom Voice Example")
     print("=" * 60)
-    
+
+    # Ensure required local assets exist before model initialization
+    repo_root = Path(__file__).resolve().parents[1]
+    ensure_required_models(repo_root)
+
     # Initialize CustomVoice model
     print(f"\nLoading CustomVoice model from: {args.model_path}")
     

@@ -133,11 +133,18 @@ Pick the wheel that matches your Python, CUDA, and PyTorch from:
 **Project**
 
 ```bash
-git clone https://github.com/tsdocode/nano-qwen3tts-vllm.git
+git clone https://github.com/hawkhai/nano-qwen3tts-vllm.git
 cd nano-qwen3tts-vllm
 uv sync
 # or
 pip install -e .
+
+source /data/venv/base/bin/activate
+sudo rm -rf /home/yangquanhai/.cache/uv/
+cd /data/nano-qwen3tts-vllm
+export UV_CACHE_DIR=/data/uvcache/.cache/uv
+uv sync --index-url https://mirrors.aliyun.com/pypi/simple
+
 ```
 
 ## Supported Models

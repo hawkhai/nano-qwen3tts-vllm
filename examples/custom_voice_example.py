@@ -34,6 +34,7 @@ from pathlib import Path
 
 import soundfile as sf
 
+sys.path.append(".")
 from nano_qwen3tts_vllm.interface import Qwen3TTSInterface
 
 

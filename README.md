@@ -184,7 +184,7 @@ nvcc -V
 python -c "import torch; print(torch.__version__, torch.version.cuda)"
 which nvcc
 
-
+python examples/custom_voice_example.py --model-path Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --text "Hello world" --speaker Vivian
 
 
 

@@ -155,13 +155,19 @@ def parse_args():
 async def collect_audio_codes(interface: Qwen3TTSInterface, *, text: str, language: str, speaker: str):
     """Collect codec chunks via async API."""
 
+    print(f"    [collect] start text='{text[:40]}...' language={language} speaker={speaker}")
     chunks = []
+    idx = 0
     async for chunk in interface.generate_custom_voice_async(
         text=text,
         language=language,
         speaker=speaker,
     ):
+        idx += 1
         chunks.append(chunk)
+        if idx % 10 == 0:
+            print(f"    [collect] received {idx} chunks so far")
+    print(f"    [collect] finished, total chunks={idx}")
     return chunks
 
 
@@ -232,7 +238,9 @@ async def run(args):
     print(f"Number of texts: {len(texts)}")
     
     # Ensure async engines are running
+    print("Starting ZMQ tasks...")
     await interface.start_zmq_tasks()
+    print("ZMQ tasks ready")
     try:
         # Example 1: Single text generation (or batch processing)
         print("\n" + "-" * 60)
@@ -264,11 +272,12 @@ async def run(args):
             else:
                 output_path = output_dir / f"custom_voice_batch_{i}.wav"
             
+            print(f"    [write] writing {output_path} (samples={len(wavs[0])}, sr={sr})")
             sf.write(str(output_path), wavs[0], sr)
             print(f"  Generated in {elapsed:.2f}s")
             print(f"  Audio duration: {len(wavs[0])/sr:.2f}s")
             print(f"  Saved to: {output_path}")
-        
+
         total_elapsed = time.time() - total_start_time
         print(f"\nTotal processing time: {total_elapsed:.2f}s")
 
@@ -300,6 +309,7 @@ async def run(args):
                 elapsed = time.time() - start_time
                 
                 output_path = output_dir / f"custom_voice_{speaker.lower()}.wav"
+                print(f"    [write] writing {output_path}")
                 sf.write(str(output_path), wavs[0], sr)
                 print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
         
@@ -352,10 +362,13 @@ async def run(args):
                 elapsed = time.time() - start_time
                 
                 output_path = output_dir / example["output"]
+                print(f"    [write] writing {output_path}")
                 sf.write(str(output_path), wavs[0], sr)
                 print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
     finally:
+        print("Stopping ZMQ tasks...")
         await interface.stop_zmq_tasks()
+        print("ZMQ tasks stopped")
     
     print("\n" + "=" * 60)
     print("All examples completed!")

@@ -212,6 +212,25 @@ except ImportError:
     SpeechTokenizer = None
 
 
+DEFAULT_SPEECH_TOKENIZER_REPO = "Qwen/Qwen3-TTS-Tokenizer-12Hz"
+DEFAULT_SPEECH_TOKENIZER_DIRNAME = DEFAULT_SPEECH_TOKENIZER_REPO.split("/")[-1]
+
+
+def _resolve_local_tokenizer_path(model_path: str) -> Optional[str]:
+    """Attempt to find a locally downloaded speech tokenizer directory."""
+
+    env_override = os.getenv("QWEN3_TTS_TOKENIZER_PATH")
+    if env_override and os.path.isdir(env_override):
+        return env_override
+
+    model_dir = Path(model_path).resolve()
+    for candidate in {model_dir.parent / DEFAULT_SPEECH_TOKENIZER_DIRNAME, model_dir / DEFAULT_SPEECH_TOKENIZER_DIRNAME}:
+        if candidate.is_dir() and any(candidate.iterdir()):
+            return str(candidate)
+
+    return None
+
+
 torch.manual_seed(42)
 # Use Qwen3-TTS processor when available so tokenization matches Qwen3TTSModel.generate_custom_voice exactly
 def _get_processor(model_path: str):
@@ -341,6 +360,7 @@ class Qwen3TTSInterface:
         self.enforce_eager = enforce_eager
         self.tensor_parallel_size = tensor_parallel_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._local_speech_tokenizer_path = _resolve_local_tokenizer_path(model_path)
 
         # Multiprocess only: main process loads embeddings; talker/predictor run in worker processes.
         self._use_mp_engines = True
@@ -423,8 +443,11 @@ class Qwen3TTSInterface:
         try:
             # Try to load speech tokenizer
             if HAS_SPEECH_TOKENIZER:
-                self.speech_tokenizer = SpeechTokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", dtype=torch.bfloat16)
-            
+                tokenizer_source = self._local_speech_tokenizer_path or DEFAULT_SPEECH_TOKENIZER_REPO
+                if self._local_speech_tokenizer_path:
+                    logger.info(f"[speech] Using local speech tokenizer at {tokenizer_source}")
+                self.speech_tokenizer = SpeechTokenizer(tokenizer_source, dtype=torch.bfloat16)
+        
             # Try to load speaker encoder from model
             # Check if speaker_encoder exists in the model
             try:
@@ -435,6 +458,17 @@ class Qwen3TTSInterface:
             except:
                 self._speaker_encoder_available = False
         except Exception as e:
+            if self._local_speech_tokenizer_path and self._local_speech_tokenizer_path != DEFAULT_SPEECH_TOKENIZER_REPO:
+                logger.warning(
+                    "[speech] Failed to load local tokenizer (%s). Falling back to %s. Error: %s",
+                    self._local_speech_tokenizer_path,
+                    DEFAULT_SPEECH_TOKENIZER_REPO,
+                    e,
+                )
+                self._local_speech_tokenizer_path = None
+                self.speech_tokenizer = None
+                self._init_speech_components()
+                return
             print(f"Warning: Could not initialize speech components: {e}")
             self.speech_tokenizer = None
             self._speaker_encoder_available = False

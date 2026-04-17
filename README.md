@@ -143,8 +143,48 @@ source /data/venv/base/bin/activate
 sudo rm -rf /home/yangquanhai/.cache/uv/
 cd /data/nano-qwen3tts-vllm
 export UV_CACHE_DIR=/data/uvcache/.cache/uv
-uv sync --index-url https://mirrors.aliyun.com/pypi/simple
+uv sync --index-url https://mirrors.aliyun.com/pypi/simple/
 
+cd /data/nano-qwen3tts-vllm
+export UV_CACHE_DIR=/data/uvcache/.cache/uv
+source .venv/bin/activate
+which python
+which pip
+
+# 安装基础依赖
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 -i https://mirrors.aliyun.com/pypi/simple/
+# 安装 Flash Attention
+pip install flash-attn==2.6.3 --no-build-isolation -i https://mirrors.aliyun.com/pypi/simple/
+# 或者使用预编译轮子
+pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/flash_attn-2.6.3+cu128torch2.10-cp310-cp310-linux_x86_64.whl --no-build-isolation
+
+# Python 3.10.12, PyTorch 2.10.0+cu128, CUDA 12.8, GPU: NVIDIA L4
+python -m pip install flash-attn==2.6.3 --no-build-isolation -i https://mirrors.aliyun.com/pypi/simple/
+
+python examples/custom_voice_example.py --model-path Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --text "Hello world" --speaker Vivian
+
+```
+
+```
+python -c "
+import torch
+import sys
+print(f'Python: {sys.version}')
+print(f'PyTorch: {torch.__version__}')
+print(f'CUDA available: {torch.cuda.is_available()}')
+if torch.cuda.is_available():
+    print(f'CUDA version: {torch.version.cuda}')
+    print(f'GPU count: {torch.cuda.device_count()}')
+    for i in range(torch.cuda.device_count()):
+        print(f'GPU {i}: {torch.cuda.get_device_name(i)}')
+"
+
+Python: 3.11.9 (main, Apr 16 2026, 17:55:20) [GCC 11.4.0]
+PyTorch: 2.11.0+cu130
+CUDA available: True
+CUDA version: 13.0
+GPU count: 1
+GPU 0: NVIDIA L4
 ```
 
 ## Supported Models

@@ -187,7 +187,8 @@ which nvcc
 python examples/custom_voice_example.py --model-path Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --text "Hello world" --speaker Vivian
 
 
-
+wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/nano-qwen3tts-vllm/interface.py -O nano-qwen3tts-vllm/interface.py
+wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/examples/custom_voice_example.py      -O examples/custom_voice_example.py
 
 
 

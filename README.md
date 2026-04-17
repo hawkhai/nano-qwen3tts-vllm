@@ -139,6 +139,51 @@ uv sync
 # or
 pip install -e .
 
+
+
+# 全新尝试 Python 3.12, CUDA 12.4, PyTorch 2.5
+pip install uv --index-url https://mirrors.aliyun.com/pypi/simple/
+cd /data/nano-qwen3tts-vllm
+export UV_CACHE_DIR=/data/uvcache/.cache/uv
+
+uv python install 3.12
+uv python pin 3.12
+
+uv venv --python 3.12
+source .venv/bin/activate
+
+uv pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 \
+  --index-url https://download.pytorch.org/whl/cu121 \
+  --extra-index-url https://mirrors.aliyun.com/pypi/simple/
+
+uv pip install setuptools wheel ninja packaging --index-url https://mirrors.aliyun.com/pypi/simple/
+
+# Example: Python 3.12, CUDA 12.4, PyTorch 2.5
+# 使用 uv pip 安装到当前 UV 环境
+uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/flash_attn-2.6.3+cu124torch2.5-cp312-cp312-linux_x86_64.whl
+uv pip install /data/explore/mytts/qwen/flash_attn-2.6.3+cu124torch2.5-cp312-cp312-linux_x86_64.whl
+
+uv run python examples/custom_voice_example.py --model-path Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --text "Hello world" --speaker Vivian
+
+
+
+
+
+
+
+
+#uv venv --python 3.10.12
+uv venv activate
+# 1. torch
+uv pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 \
+  --index-url https://download.pytorch.org/whl/cu121 \
+  --extra-index-url https://mirrors.aliyun.com/pypi/simple/
+# 2. flash-attn
+uv pip install setuptools wheel ninja packaging --index-url https://mirrors.aliyun.com/pypi/simple/
+uv pip install flash-attn==2.6.3 --no-build-isolation --index-url https://mirrors.aliyun.com/pypi/simple/
+
+
+
 source /data/venv/base/bin/activate
 sudo rm -rf /home/yangquanhai/.cache/uv/
 cd /data/nano-qwen3tts-vllm
@@ -166,7 +211,7 @@ python examples/custom_voice_example.py --model-path Qwen/Qwen3-TTS-12Hz-1.7B-Cu
 ```
 
 ```
-python -c "
+python3 -c "
 import torch
 import sys
 print(f'Python: {sys.version}')

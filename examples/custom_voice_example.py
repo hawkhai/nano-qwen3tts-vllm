@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import soundfile as sf
 
@@ -54,9 +55,13 @@ REQUIRED_MODEL_DOWNLOADS = [
     ),
 ]
 
+DEFAULT_CUSTOM_VOICE_DIR = REQUIRED_MODEL_DOWNLOADS[-1][1]
 
-def ensure_required_models(base_dir: Path) -> None:
+
+def ensure_required_models(base_dir: Path) -> Optional[Path]:
     """Download required models via ModelScope if they are missing locally."""
+
+    local_custom_voice_dir = base_dir / DEFAULT_CUSTOM_VOICE_DIR
 
     for model_id, relative_dir in REQUIRED_MODEL_DOWNLOADS:
         target_dir = base_dir / relative_dir
@@ -65,8 +70,6 @@ def ensure_required_models(base_dir: Path) -> None:
 
         target_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
-            sys.executable,
-            "-m",
             "modelscope",
             "download",
             "--model",
@@ -78,11 +81,19 @@ def ensure_required_models(base_dir: Path) -> None:
         print(f"Missing model '{model_id}'. Downloading to {target_dir} via ModelScope...")
         try:
             subprocess.run(cmd, check=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Cannot find `modelscope` CLI. Install it via `pip install modelscope`."
+            ) from exc
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
-                "ModelScope download failed. Ensure `pip install modelscope` is executed "
-                "and the command can access the internet."
+                "ModelScope download failed. Ensure `modelscope download` works manually "
+                "and that this machine can access the internet."
             ) from exc
+
+    if local_custom_voice_dir.is_dir() and any(local_custom_voice_dir.iterdir()):
+        return local_custom_voice_dir
+    return None
 
 
 def main():
@@ -126,6 +137,16 @@ def main():
         default="./output",
         help="Output directory for generated audio files",
     )
+    parser.add_argument(
+        "--prefer-modelscope-local",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When provided model path is not a local directory, prefer using the locally "
+            "downloaded ModelScope assets (if available). Pass --no-prefer-modelscope-local "
+            "to disable this behavior."
+        ),
+    )
     
     args = parser.parse_args()
     
@@ -140,17 +161,30 @@ def main():
 
     # Ensure required local assets exist before model initialization
     repo_root = Path(__file__).resolve().parents[1]
-    ensure_required_models(repo_root)
+    local_modelscope_dir = ensure_required_models(repo_root)
+
+    model_path_to_use = args.model_path
+    if (
+        args.prefer_modelscope_local
+        and local_modelscope_dir is not None
+        and not os.path.isdir(args.model_path)
+        and not os.path.isfile(args.model_path)
+    ):
+        model_path_to_use = str(local_modelscope_dir)
+        print(
+            "Using locally downloaded ModelScope model at: "
+            f"{local_modelscope_dir}"
+        )
 
     # Initialize CustomVoice model
-    print(f"\nLoading CustomVoice model from: {args.model_path}")
+    print(f"\nLoading CustomVoice model from: {model_path_to_use}")
     
     # Check if it's a HuggingFace model ID or local path
     # Use from_pretrained which handles both cases automatically
-    if os.path.isdir(args.model_path) or os.path.isfile(args.model_path):
+    if os.path.isdir(model_path_to_use) or os.path.isfile(model_path_to_use):
         # Local path - use regular init
         interface = Qwen3TTSInterface(
-            model_path=args.model_path,
+            model_path=model_path_to_use,
             enforce_eager=False,
             tensor_parallel_size=1,
         )
@@ -158,7 +192,7 @@ def main():
         # Likely a HuggingFace model ID, use from_pretrained
         print("  Detected HuggingFace model ID, downloading if needed...")
         interface = Qwen3TTSInterface.from_pretrained(
-            pretrained_model_name_or_path=args.model_path,
+            pretrained_model_name_or_path=model_path_to_use,
             enforce_eager=False,
             tensor_parallel_size=1,
         )

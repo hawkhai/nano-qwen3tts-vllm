@@ -27,6 +27,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import os
 import subprocess
 import sys
@@ -96,7 +97,7 @@ def ensure_required_models(base_dir: Path) -> Optional[Path]:
     return None
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(
         description="Example demonstrating Custom Voice feature"
     )
@@ -148,7 +149,23 @@ def main():
         ),
     )
     
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+async def collect_audio_codes(interface: Qwen3TTSInterface, *, text: str, language: str, speaker: str):
+    """Collect codec chunks via async API."""
+
+    chunks = []
+    async for chunk in interface.generate_custom_voice_async(
+        text=text,
+        language=language,
+        speaker=speaker,
+    ):
+        chunks.append(chunk)
+    return chunks
+
+
+async def run(args):
     
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -214,123 +231,131 @@ def main():
     print(f"Language: {args.language}")
     print(f"Number of texts: {len(texts)}")
     
-    # Example 1: Single text generation (or batch processing)
-    print("\n" + "-" * 60)
-    print(f"[{mode.title()}] Generating speech with custom voice")
-    print("-" * 60)
-    
-    total_start_time = time.time()
-    
-    for i, text in enumerate(texts, 1):
-        print(f"\n[{i}/{len(texts)}] Text: {text}")
-        start_time = time.time()
-        
-        # Generate codec chunks
-        audio_codes = list(interface.generate_custom_voice(
-            text=text,
-            language=args.language,
-            speaker=args.speaker,
-        ))
-        
-        # Decode to audio
-        wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
-        
-        elapsed = time.time() - start_time
-        
-        # Generate output filename
-        if mode == "single":
-            output_path = output_dir / "custom_voice_output.wav"
-        else:
-            output_path = output_dir / f"custom_voice_batch_{i}.wav"
-        
-        sf.write(str(output_path), wavs[0], sr)
-        print(f"  Generated in {elapsed:.2f}s")
-        print(f"  Audio duration: {len(wavs[0])/sr:.2f}s")
-        print(f"  Saved to: {output_path}")
-    
-    total_elapsed = time.time() - total_start_time
-    print(f"\nTotal processing time: {total_elapsed:.2f}s")
-    
-    # Example 2: Different speakers (if in single mode)
-    if mode == "single":
+    # Ensure async engines are running
+    await interface.start_zmq_tasks()
+    try:
+        # Example 1: Single text generation (or batch processing)
         print("\n" + "-" * 60)
-        print("[Example 2] Different speakers demonstration")
+        print(f"[{mode.title()}] Generating speech with custom voice")
         print("-" * 60)
         
-        # Common available speakers for CustomVoice models
-        speakers = ["Vivian", "Mike", "Sarah", "Laura", "Alex", "Ethan", "Emma"]
-        demo_text = "Hello, this is a demonstration of different speaker voices."
+        total_start_time = time.time()
         
-        # Test a few different speakers
-        test_speakers = speakers[:3]  # Test first 3 speakers
-        
-        for speaker in test_speakers:
-            print(f"\nSpeaker: {speaker}")
-            print(f"  Text: {demo_text}")
-            
+        for i, text in enumerate(texts, 1):
+            print(f"\n[{i}/{len(texts)}] Text: {text}")
             start_time = time.time()
-            audio_codes = list(interface.generate_custom_voice(
-                text=demo_text,
+            
+            # Generate codec chunks
+            audio_codes = await collect_audio_codes(
+                interface,
+                text=text,
                 language=args.language,
-                speaker=speaker,
-            ))
-            wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
-            elapsed = time.time() - start_time
-            
-            output_path = output_dir / f"custom_voice_{speaker.lower()}.wav"
-            sf.write(str(output_path), wavs[0], sr)
-            print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
-    
-    # Example 3: Different languages (if in single mode)
-    if mode == "single":
-        print("\n" + "-" * 60)
-        print("[Example 3] Multi-language demonstration")
-        print("-" * 60)
-        
-        multilingual_examples = [
-            {
-                "text": "Hello, this is English speech synthesis.",
-                "language": "English",
-                "output": "custom_voice_english.wav",
-            },
-            {
-                "text": "Hola, esto es síntesis de voz en español.",
-                "language": "Spanish",
-                "output": "custom_voice_spanish.wav",
-            },
-            {
-                "text": "Bonjour, ceci est une synthèse vocale en français.",
-                "language": "French",
-                "output": "custom_voice_french.wav",
-            },
-            {
-                "text": "Guten Tag, dies ist Sprachsynthese auf Deutsch.",
-                "language": "German",
-                "output": "custom_voice_german.wav",
-            },
-            {
-                "text": "Ciao, questo è un sintesi vocale in italiano.",
-                "language": "Italian",
-                "output": "custom_voice_italian.wav",
-            },
-        ]
-        
-        for example in multilingual_examples:
-            print(f"\nLanguage: {example['language']}")
-            print(f"  Text: {example['text']}")
-            
-            start_time = time.time()
-            audio_codes = list(interface.generate_custom_voice(
-                text=example["text"],
-                language=example["language"],
                 speaker=args.speaker,
-            ))
+            )
+            
+            # Decode to audio
             wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+            
             elapsed = time.time() - start_time
             
-            output_path = output_dir / example["output"]
+            # Generate output filename
+            if mode == "single":
+                output_path = output_dir / "custom_voice_output.wav"
+            else:
+                output_path = output_dir / f"custom_voice_batch_{i}.wav"
+            
             sf.write(str(output_path), wavs[0], sr)
-            print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
+            print(f"  Generated in {elapsed:.2f}s")
+            print(f"  Audio duration: {len(wavs[0])/sr:.2f}s")
+            print(f"  Saved to: {output_path}")
+        
+        total_elapsed = time.time() - total_start_time
+        print(f"\nTotal processing time: {total_elapsed:.2f}s")
+
+        # Example 2: Different speakers (if in single mode)
+        if mode == "single":
+            print("\n" + "-" * 60)
+            print("[Example 2] Different speakers demonstration")
+            print("-" * 60)
+            
+            # Common available speakers for CustomVoice models
+            speakers = ["Vivian", "Mike", "Sarah", "Laura", "Alex", "Ethan", "Emma"]
+            demo_text = "Hello, this is a demonstration of different speaker voices."
+            
+            # Test a few different speakers
+            test_speakers = speakers[:3]  # Test first 3 speakers
+            
+            for speaker in test_speakers:
+                print(f"\nSpeaker: {speaker}")
+                print(f"  Text: {demo_text}")
+                
+                start_time = time.time()
+                audio_codes = await collect_audio_codes(
+                    interface,
+                    text=demo_text,
+                    language=args.language,
+                    speaker=speaker,
+                )
+                wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+                elapsed = time.time() - start_time
+                
+                output_path = output_dir / f"custom_voice_{speaker.lower()}.wav"
+                sf.write(str(output_path), wavs[0], sr)
+                print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
+        
+        # Example 3: Different languages (if in single mode)
+        if mode == "single":
+            print("\n" + "-" * 60)
+            print("[Example 3] Multi-language demonstration")
+            print("-" * 60)
+            
+            multilingual_examples = [
+                {
+                    "text": "Hello, this is English speech synthesis.",
+                    "language": "English",
+                    "output": "custom_voice_english.wav",
+                },
+                {
+                    "text": "Hola, esto es síntesis de voz en español.",
+                    "language": "Spanish",
+                    "output": "custom_voice_spanish.wav",
+                },
+                {
+                    "text": "Bonjour, ceci est une synthèse vocale en français.",
+                    "language": "French",
+                    "output": "custom_voice_french.wav",
+                },
+                {
+                    "text": "Guten Tag, dies ist Sprachsynthese auf Deutsch.",
+                    "language": "German",
+                    "output": "custom_voice_german.wav",
+                },
+                {
+                    "text": "Ciao, questo è un sintesi vocale in italiano.",
+                    "language": "Italian",
+                    "output": "custom_voice_italian.wav",
+                },
+            ]
+            
+            for example in multilingual_examples:
+                print(f"\nLanguage: {example['language']}")
+                print(f"  Text: {example['text']}")
+                
+                start_time = time.time()
+                audio_codes = await collect_audio_codes(
+                    interface,
+                    text=example["text"],
+                    language=example["language"],
+                    speaker=args.speaker,
+                )
+                wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+                elapsed = time.time() - start_time
+                
+                output_path = output_dir / example["output"]
+                sf.write(str(output_path), wavs[0], sr)
+                print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
+    finally:
+        await interface.stop_zmq_tasks()
     
     print("\n" + "=" * 60)
     print("All examples completed!")
@@ -350,4 +375,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    asyncio.run(run(args))

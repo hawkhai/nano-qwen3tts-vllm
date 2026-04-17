@@ -22,6 +22,7 @@ class TTSTokenizer:
             model_path,
             trust_remote_code=True,
             use_fast=True,
+            fix_mistral_regex=True,
         )
         
         # Cache special token IDs

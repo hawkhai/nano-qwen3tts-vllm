@@ -148,6 +148,25 @@ def parse_args():
             "to disable this behavior."
         ),
     )
+    parser.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        default=float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.9")),
+        help=(
+            "Fraction of total GPU memory allowed for the interface (split between Talker/Predictor). "
+            "Lower this (e.g., 0.3) on smaller GPUs to avoid OOM. Can also be set via "
+            "GPU_MEMORY_UTILIZATION env var."
+        ),
+    )
+    parser.add_argument(
+        "--enforce-eager",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Disable CUDA graph capture and run models in eager mode. This reduces upfront memory "
+            "needed for graph buffers at the cost of some throughput."
+        ),
+    )
     
     return parser.parse_args()
 
@@ -208,16 +227,18 @@ async def run(args):
         # Local path - use regular init
         interface = Qwen3TTSInterface(
             model_path=model_path_to_use,
-            enforce_eager=False,
+            enforce_eager=args.enforce_eager,
             tensor_parallel_size=1,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
     else:
         # Likely a HuggingFace model ID, use from_pretrained
         print("  Detected HuggingFace model ID, downloading if needed...")
         interface = Qwen3TTSInterface.from_pretrained(
             pretrained_model_name_or_path=model_path_to_use,
-            enforce_eager=False,
+            enforce_eager=args.enforce_eager,
             tensor_parallel_size=1,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
     print("Model loaded successfully")
     
@@ -281,90 +302,90 @@ async def run(args):
         total_elapsed = time.time() - total_start_time
         print(f"\nTotal processing time: {total_elapsed:.2f}s")
 
-        # Example 2: Different speakers (if in single mode)
-        if mode == "single":
-            print("\n" + "-" * 60)
-            print("[Example 2] Different speakers demonstration")
-            print("-" * 60)
+        # Example 2/3 omitted by default to avoid additional GPU load.
+        # Uncomment below if you want to demo multiple speakers/languages.
+        # if mode == "single":
+        #     print("\n" + "-" * 60)
+        #     print("[Example 2] Different speakers demonstration")
+        #     print("-" * 60)
             
-            # Common available speakers for CustomVoice models
-            speakers = ["Vivian", "Mike", "Sarah", "Laura", "Alex", "Ethan", "Emma"]
-            demo_text = "Hello, this is a demonstration of different speaker voices."
+        #     # Common available speakers for CustomVoice models
+        #     speakers = ["Vivian", "Mike", "Sarah", "Laura", "Alex", "Ethan", "Emma"]
+        #     demo_text = "Hello, this is a demonstration of different speaker voices."
             
-            # Test a few different speakers
-            test_speakers = speakers[:3]  # Test first 3 speakers
+        #     # Test a few different speakers
+        #     test_speakers = speakers[:3]  # Test first 3 speakers
             
-            for speaker in test_speakers:
-                print(f"\nSpeaker: {speaker}")
-                print(f"  Text: {demo_text}")
+        #     for speaker in test_speakers:
+        #         print(f"\nSpeaker: {speaker}")
+        #         print(f"  Text: {demo_text}")
                 
-                start_time = time.time()
-                audio_codes = await collect_audio_codes(
-                    interface,
-                    text=demo_text,
-                    language=args.language,
-                    speaker=speaker,
-                )
-                wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
-                elapsed = time.time() - start_time
+        #         start_time = time.time()
+        #         audio_codes = await collect_audio_codes(
+        #             interface,
+        #             text=demo_text,
+        #             language=args.language,
+        #             speaker=speaker,
+        #         )
+        #         wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+        #         elapsed = time.time() - start_time
                 
-                output_path = output_dir / f"custom_voice_{speaker.lower()}.wav"
-                print(f"    [write] writing {output_path}")
-                sf.write(str(output_path), wavs[0], sr)
-                print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
+        #         output_path = output_dir / f"custom_voice_{speaker.lower()}.wav"
+        #         print(f"    [write] writing {output_path}")
+        #         sf.write(str(output_path), wavs[0], sr)
+        #         print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
         
-        # Example 3: Different languages (if in single mode)
-        if mode == "single":
-            print("\n" + "-" * 60)
-            print("[Example 3] Multi-language demonstration")
-            print("-" * 60)
+        # if mode == "single":
+        #     print("\n" + "-" * 60)
+        #     print("[Example 3] Multi-language demonstration")
+        #     print("-" * 60)
             
-            multilingual_examples = [
-                {
-                    "text": "Hello, this is English speech synthesis.",
-                    "language": "English",
-                    "output": "custom_voice_english.wav",
-                },
-                {
-                    "text": "Hola, esto es síntesis de voz en español.",
-                    "language": "Spanish",
-                    "output": "custom_voice_spanish.wav",
-                },
-                {
-                    "text": "Bonjour, ceci est une synthèse vocale en français.",
-                    "language": "French",
-                    "output": "custom_voice_french.wav",
-                },
-                {
-                    "text": "Guten Tag, dies ist Sprachsynthese auf Deutsch.",
-                    "language": "German",
-                    "output": "custom_voice_german.wav",
-                },
-                {
-                    "text": "Ciao, questo è un sintesi vocale in italiano.",
-                    "language": "Italian",
-                    "output": "custom_voice_italian.wav",
-                },
-            ]
+        #     multilingual_examples = [
+        #         {
+        #             "text": "Hello, this is English speech synthesis.",
+        #             "language": "English",
+        #             "output": "custom_voice_english.wav",
+        #         },
+        #         {
+        #             "text": "Hola, esto es síntesis de voz en español.",
+        #             "language": "Spanish",
+        #             "output": "custom_voice_spanish.wav",
+        #         },
+        #         {
+        #             "text": "Bonjour, ceci est une synthèse vocale en français.",
+        #             "language": "French",
+        #             "output": "custom_voice_french.wav",
+        #         },
+        #         {
+        #             "text": "Guten Tag, dies ist Sprachsynthese auf Deutsch.",
+        #             "language": "German",
+        #             "output": "custom_voice_german.wav",
+        #         },
+        #         {
+        #             "text": "Ciao, questo è un sintesi vocale in italiano.",
+        #             "language": "Italian",
+        #             "output": "custom_voice_italian.wav",
+        #         },
+        #     ]
             
-            for example in multilingual_examples:
-                print(f"\nLanguage: {example['language']}")
-                print(f"  Text: {example['text']}")
+        #     for example in multilingual_examples:
+        #         print(f"\nLanguage: {example['language']}")
+        #         print(f"  Text: {example['text']}")
                 
-                start_time = time.time()
-                audio_codes = await collect_audio_codes(
-                    interface,
-                    text=example["text"],
-                    language=example["language"],
-                    speaker=args.speaker,
-                )
-                wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
-                elapsed = time.time() - start_time
+        #         start_time = time.time()
+        #         audio_codes = await collect_audio_codes(
+        #             interface,
+        #             text=example["text"],
+        #             language=example["language"],
+        #             speaker=args.speaker,
+        #         )
+        #         wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+        #         elapsed = time.time() - start_time
                 
-                output_path = output_dir / example["output"]
-                print(f"    [write] writing {output_path}")
-                sf.write(str(output_path), wavs[0], sr)
-                print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
+        #         output_path = output_dir / example["output"]
+        #         print(f"    [write] writing {output_path}")
+        #         sf.write(str(output_path), wavs[0], sr)
+        #         print(f"  Generated in {elapsed:.2f}s, saved to: {output_path}")
     finally:
         print("Stopping ZMQ tasks...")
         await interface.stop_zmq_tasks()

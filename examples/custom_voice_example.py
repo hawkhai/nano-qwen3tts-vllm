@@ -29,6 +29,7 @@ Usage:
 # Fix cuDNN SDPA compatibility issue - MUST be set before importing torch
 import os
 os.environ["TORCH_SDPA_BACKEND"] = "flash_attention,mem_efficient,math"
+os.environ["TORCH_CUDNN_SDPA_ENABLED"] = "0"
 
 import argparse
 import asyncio
@@ -40,6 +41,9 @@ from typing import Optional
 
 import soundfile as sf
 import torch
+
+# Disable cuDNN SDPA backend to avoid cuDNN Frontend errors
+torch.backends.cuda.enable_cudnn_sdp(False)
 
 # Increase torch dynamo cache size limit to avoid recompilation warnings
 torch._dynamo.config.cache_size_limit = 64
@@ -158,10 +162,11 @@ def parse_args():
     parser.add_argument(
         "--gpu-memory-utilization",
         type=float,
-        default=float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.9")),
+        default=float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.45")),
         help=(
             "Fraction of total GPU memory allowed for the interface (split between Talker/Predictor). "
-            "Lower this (e.g., 0.3) on smaller GPUs to avoid OOM. Can also be set via "
+            "Default 0.45 (~10.4GB on 23GB L4 GPU) allows running 2 instances with balanced performance. "
+            "Use 0.9 for single instance max performance. Can also be set via "
             "GPU_MEMORY_UTILIZATION env var."
         ),
     )
@@ -171,7 +176,8 @@ def parse_args():
         default=False,
         help=(
             "Disable CUDA graph capture and run models in eager mode. This reduces upfront memory "
-            "needed for graph buffers at the cost of some throughput."
+            "needed for graph buffers (saves 2-3GB) but lowers GPU utilization and throughput. "
+            "Default False for better performance. Use --enforce-eager only if OOM occurs."
         ),
     )
     
@@ -296,15 +302,7 @@ async def run(args):
             
             # Decode to audio (post-processing time)
             decode_start = time.time()
-            # Temporarily disable cuDNN SDPA backend for decode to avoid cuDNN Frontend errors
-            # Use flash_attention, mem_efficient, or math backends instead
-            with torch.nn.attention.sdpa_kernel(
-                enable_flash=True,
-                enable_mem_efficient=True, 
-                enable_math=True,
-                enable_cudnn=False  # Disable cuDNN backend
-            ):
-                wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+            wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
             decode_time = time.time() - decode_start
             
             # I/O time

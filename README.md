@@ -193,7 +193,7 @@ wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/examples/
 source /data/venv/base/bin/activate
 cd /data/pythonx/
 python3 kremotek.py downcode
-python3 kremotek.py download code_mytts.json
+python3 kremotek.py download code_mytts.json removex
 
 cp -a /data/explore/mytts/nano-qwen3tts-vllm/examples/. \
      /data/nano-qwen3tts-vllm/examples/

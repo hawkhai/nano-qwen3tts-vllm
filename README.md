@@ -190,6 +190,10 @@ python examples/custom_voice_example.py --model-path Qwen/Qwen3-TTS-12Hz-1.7B-Cu
 wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/nano-qwen3tts-vllm/interface.py -O nano-qwen3tts-vllm/interface.py
 wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/examples/custom_voice_example.py      -O examples/custom_voice_example.py
 
+source /data/venv/base/bin/activate
+cd /data/pythonx/
+python3 kremotek.py downcode
+python3 kremotek.py download code_mytts.json
 
 cp -a /data/explore/mytts/nano-qwen3tts-vllm/examples/. \
      /data/nano-qwen3tts-vllm/examples/

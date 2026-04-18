@@ -26,9 +26,12 @@ Usage:
         --output-dir ./output
 """
 
+# Fix cuDNN SDPA compatibility issue - MUST be set before importing torch
+import os
+os.environ["TORCH_SDPA_BACKEND"] = "flash_attention,mem_efficient,math"
+
 import argparse
 import asyncio
-import os
 import subprocess
 import sys
 import time
@@ -36,6 +39,7 @@ from pathlib import Path
 from typing import Optional
 
 import soundfile as sf
+import torch
 
 sys.path.append(".")
 from nano_qwen3tts_vllm.interface import Qwen3TTSInterface
@@ -272,9 +276,12 @@ async def run(args):
         
         for i, text in enumerate(texts, 1):
             print(f"\n[{i}/{len(texts)}] Text: {text}")
-            start_time = time.time()
+            print(f"  Text length: {len(text)} characters")
             
-            # Generate codec chunks
+            # Start timing for pure inference
+            inference_start = time.time()
+            
+            # Generate codec chunks (pure inference time)
             audio_codes = await collect_audio_codes(
                 interface,
                 text=text,
@@ -282,25 +289,53 @@ async def run(args):
                 speaker=args.speaker,
             )
             
-            # Decode to audio
-            wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+            inference_time = time.time() - inference_start
             
-            elapsed = time.time() - start_time
+            # Decode to audio (post-processing time)
+            decode_start = time.time()
+            # Temporarily disable cuDNN SDPA backend for decode to avoid cuDNN Frontend errors
+            # Use flash_attention, mem_efficient, or math backends instead
+            with torch.backends.cuda.sdp_kernel(
+                enable_flash=True,
+                enable_mem_efficient=True, 
+                enable_math=True,
+                enable_cudnn=False  # Disable cuDNN backend
+            ):
+                wavs, sr = speech_tokenizer.decode([{"audio_codes": audio_codes}])
+            decode_time = time.time() - decode_start
             
-            # Generate output filename
+            # I/O time
+            io_start = time.time()
             if mode == "single":
                 output_path = output_dir / "custom_voice_output.wav"
             else:
                 output_path = output_dir / f"custom_voice_batch_{i}.wav"
-            
-            print(f"    [write] writing {output_path} (samples={len(wavs[0])}, sr={sr})")
             sf.write(str(output_path), wavs[0], sr)
-            print(f"  Generated in {elapsed:.2f}s")
-            print(f"  Audio duration: {len(wavs[0])/sr:.2f}s")
-            print(f"  Saved to: {output_path}")
+            io_time = time.time() - io_start
+            
+            # Calculate metrics
+            audio_duration = len(wavs[0]) / sr
+            rtf = inference_time / audio_duration if audio_duration > 0 else 0
+            total_time = inference_time + decode_time + io_time
+            
+            # Print detailed timing statistics
+            print(f"\n  ⏱️  Performance Metrics:")
+            print(f"    Pure Inference Time: {inference_time:.3f}s")
+            print(f"    Decode Time:         {decode_time:.3f}s")
+            print(f"    I/O Time:            {io_time:.3f}s")
+            print(f"    Total Time:          {total_time:.3f}s")
+            print(f"    Audio Duration:      {audio_duration:.3f}s")
+            print(f"    RTF (Real-Time Factor): {rtf:.3f}x")
+            print(f"    Throughput:          {len(text)/inference_time:.1f} chars/sec")
+            print(f"  💾 Output: {output_path}")
 
         total_elapsed = time.time() - total_start_time
-        print(f"\nTotal processing time: {total_elapsed:.2f}s")
+        print(f"\n{'='*60}")
+        print(f"📊 Summary Statistics:")
+        print(f"  Total texts processed: {len(texts)}")
+        print(f"  Total processing time: {total_elapsed:.2f}s")
+        print(f"  Average time per text: {total_elapsed/len(texts):.2f}s")
+        print(f"{'='*60}")
 
         # Example 2/3 omitted by default to avoid additional GPU load.
         # Uncomment below if you want to demo multiple speakers/languages.

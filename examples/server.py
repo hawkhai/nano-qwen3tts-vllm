@@ -136,7 +136,7 @@ def get_interface():
     if _interface is None:
         from nano_qwen3tts_vllm.interface import Qwen3TTSInterface
         model_path = os.environ.get("QWEN3_TTS_MODEL_PATH", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
-        gpu_mem_util = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.9"))
+        gpu_mem_util = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.95"))
 
         if os.path.isdir(model_path) or os.path.isfile(model_path):
             _interface = Qwen3TTSInterface(

@@ -427,12 +427,13 @@ class Qwen3TTSInterface:
             self.text_projection = None
             self.predictor_input_embeddings = None
             
-            # Single-process mode: reduce memory utilization to leave headroom for warmup/compilation
-            # Use 60% of the requested utilization per engine to avoid OOM
-            single_proc_talker_util = talker_gpu_util * 0.6
-            single_proc_predictor_util = predictor_gpu_util * 0.6
-            # Force eager mode in single-process to avoid Triton compilation overhead
-            single_proc_eager = True
+            # Single-process mode: use most of the computed budget for KV cache.
+            # _compute_memory_split already includes a 1.5x overhead factor for
+            # activations/fragmentation, so 0.9x here is safe and maximizes batch size.
+            single_proc_talker_util = talker_gpu_util * 0.9
+            single_proc_predictor_util = predictor_gpu_util * 0.9
+            # Respect caller's enforce_eager setting; CUDA graphs boost GPU utilization.
+            single_proc_eager = enforce_eager
             
             logger.info(
                 f"[interface] single-process memory: talker={single_proc_talker_util:.2f}, "

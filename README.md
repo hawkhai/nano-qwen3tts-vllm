@@ -202,7 +202,11 @@ cp -a /data/explore/mytts/nano-qwen3tts-vllm/nano-qwen3tts-vllm/. \
 
 nvidia-smi
 
-
+cp -a /data/nano-qwen3tts-vllm/output/. /data/explore/mytts/nano-qwen3tts-vllm/output/ 
+     
+	 
+	 
+	 
 
 
 

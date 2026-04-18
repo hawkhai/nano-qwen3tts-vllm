@@ -41,6 +41,9 @@ from typing import Optional
 import soundfile as sf
 import torch
 
+# Increase torch dynamo cache size limit to avoid recompilation warnings
+torch._dynamo.config.cache_size_limit = 64
+
 sys.path.append(".")
 from nano_qwen3tts_vllm.interface import Qwen3TTSInterface
 
@@ -295,7 +298,7 @@ async def run(args):
             decode_start = time.time()
             # Temporarily disable cuDNN SDPA backend for decode to avoid cuDNN Frontend errors
             # Use flash_attention, mem_efficient, or math backends instead
-            with torch.backends.cuda.sdp_kernel(
+            with torch.nn.attention.sdpa_kernel(
                 enable_flash=True,
                 enable_mem_efficient=True, 
                 enable_math=True,

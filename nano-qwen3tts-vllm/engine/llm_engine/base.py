@@ -29,7 +29,7 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True, fix_mistral_regex=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = None  # subclasses create after model_runner post_init sets config.num_kvcache_blocks
         atexit.register(self.exit)

@@ -191,7 +191,13 @@ wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/nano-qwen
 wget https://raw.githubusercontent.com/hawkhai/nano-qwen3tts-vllm/main/examples/custom_voice_example.py      -O examples/custom_voice_example.py
 
 
-cp /data/explore/mytts/nano-qwen3tts-vllm/examples/custom_voice_example.py /data/nano-qwen3tts-vllm/examples/custom_voice_example.py
+cp -a /data/explore/mytts/nano-qwen3tts-vllm/examples/. \
+     /data/nano-qwen3tts-vllm/examples/
+cp -a /data/explore/mytts/nano-qwen3tts-vllm/nano-qwen3tts-vllm/. \
+     /data/nano-qwen3tts-vllm/nano-qwen3tts-vllm/
+
+nvidia-smi
+
 
 
 

@@ -3,6 +3,7 @@ import base64
 import io
 import os
 import queue
+import threading
 import uuid
 import torch
 import urllib.request
@@ -22,6 +23,8 @@ from nano_qwen3tts_vllm.processor import Qwen3TTSProcessor
 from nano_qwen3tts_vllm.utils.generation import prepare_inputs, generate_speaker_prompt, generate_icl_prompt
 from nano_qwen3tts_vllm.sampling_params import SamplingParams
 from nano_qwen3tts_vllm.utils.embedding_loader import load_embeddings_only
+from nano_qwen3tts_vllm.llm import TalkerLLM, PredictorLLM
+
 from nano_qwen3tts_vllm.config import Qwen3TTSConfig
 import copy
 import gc
@@ -52,6 +55,14 @@ def _clone_embedding_module(module: nn.Module, device: torch.device) -> nn.Modul
         return out.to(device)
     # Custom (e.g. Qwen3TTSTalkerResizeMLP): deepcopy then to device
     return copy.deepcopy(module).to(device)
+
+
+def _load_full_config(model_path: str) -> Qwen3TTSConfig:
+    """Load the full Qwen3 TTS config from disk."""
+    config_path = os.path.join(model_path, "config.json")
+    with open(config_path, "r") as f:
+        config_dict = json.load(f)
+    return Qwen3TTSConfig(**config_dict)
 
 
 def _estimate_model_params(cfg) -> int:
@@ -255,6 +266,7 @@ class Qwen3TTSInterface:
         enforce_eager: bool = False,
         tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.9,
+        use_multiprocess_engines: bool = False,
     ):
         """Load Qwen3TTSInterface from HuggingFace model repository or local path.
         
@@ -274,6 +286,7 @@ class Qwen3TTSInterface:
             tensor_parallel_size: Number of GPUs for tensor parallelism.
             gpu_memory_utilization: Fraction of GPU memory to use for the entire interface
                 (both Talker and Predictor models). Automatically split between models.
+            use_multiprocess_engines: Whether to use multiprocess engines for async generation.
         
         Returns:
             Qwen3TTSInterface instance.
@@ -352,10 +365,17 @@ class Qwen3TTSInterface:
             enforce_eager=enforce_eager,
             tensor_parallel_size=tensor_parallel_size,
             gpu_memory_utilization=gpu_memory_utilization,
+            use_multiprocess_engines=use_multiprocess_engines,
         )
     
-    def __init__(self, model_path: str, enforce_eager: bool = False, tensor_parallel_size: int = 1,
-                 gpu_memory_utilization: float = 0.9):
+    def __init__(
+        self,
+        model_path: str,
+        enforce_eager: bool = False,
+        tensor_parallel_size: int = 1,
+        gpu_memory_utilization: float = 0.9,
+        use_multiprocess_engines: bool = False,
+    ):
         self.model_path = model_path
         self.enforce_eager = enforce_eager
         self.tensor_parallel_size = tensor_parallel_size
@@ -363,14 +383,19 @@ class Qwen3TTSInterface:
         self._local_speech_tokenizer_path = _resolve_local_tokenizer_path(model_path)
 
         # Multiprocess only: main process loads embeddings; talker/predictor run in worker processes.
-        self._use_mp_engines = True
+        env_override = os.environ.get("USE_MULTIPROCESS_ENGINES")
+        if env_override is not None:
+            use_multiprocess_engines = env_override not in {"0", "false", "False"}
+        self._use_mp_engines = use_multiprocess_engines
 
         # ── Smart memory split ──
         mem_cfg = _compute_memory_split(model_path, gpu_memory_utilization)
         proc_frac = mem_cfg["process_gpu_memory_fraction"]
+        talker_gpu_util = mem_cfg["talker_util"]
+        predictor_gpu_util = mem_cfg["pred_util"]
 
         # Cap this process's GPU memory before any model load.
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and self._use_mp_engines:
             try:
                 set_frac = getattr(torch.cuda, "set_per_process_memory_fraction", None) or getattr(
                     getattr(torch.cuda, "memory", None), "set_per_process_memory_fraction", None
@@ -382,16 +407,56 @@ class Qwen3TTSInterface:
                 logger.warning(f"[memory] set_per_process_memory_fraction failed: {e}")
 
         # Main process only needs config + embedding layers; workers hold full Talker/Predictor.
-        logger.info("[interface] multiprocess mode: loading only embeddings from disk (no runner init)")
-        (
-            self.model_config,
-            self.text_embedding,
-            self.input_embedding,
-            self.text_projection,
-            self.predictor_input_embeddings,
-        ) = load_embeddings_only(model_path, device=str(self.device))
-        self.talker_llm = None
-        self.predictor_llm = None
+        if self._use_mp_engines:
+            logger.info("[interface] multiprocess mode: loading only embeddings from disk (no runner init)")
+            (
+                self.model_config,
+                self.text_embedding,
+                self.input_embedding,
+                self.text_projection,
+                self.predictor_input_embeddings,
+            ) = load_embeddings_only(model_path, device=str(self.device))
+            self.talker_llm = None
+            self.predictor_llm = None
+        else:
+            logger.info("[interface] single-process mode: fully initializing Talker/Predictor LLM engines")
+            full_config = _load_full_config(model_path)
+            self.model_config = full_config
+            self.text_embedding = None
+            self.input_embedding = None
+            self.text_projection = None
+            self.predictor_input_embeddings = None
+            
+            # Single-process mode: reduce memory utilization to leave headroom for warmup/compilation
+            # Use 60% of the requested utilization per engine to avoid OOM
+            single_proc_talker_util = talker_gpu_util * 0.6
+            single_proc_predictor_util = predictor_gpu_util * 0.6
+            # Force eager mode in single-process to avoid Triton compilation overhead
+            single_proc_eager = True
+            
+            logger.info(
+                f"[interface] single-process memory: talker={single_proc_talker_util:.2f}, "
+                f"predictor={single_proc_predictor_util:.2f}, enforce_eager={single_proc_eager}"
+            )
+            
+            self.talker_llm = TalkerLLM(
+                model_path,
+                enforce_eager=single_proc_eager,
+                tensor_parallel_size=tensor_parallel_size,
+                gpu_memory_utilization=single_proc_talker_util,
+            )
+            self.predictor_llm = PredictorLLM(
+                model_path,
+                enforce_eager=single_proc_eager,
+                tensor_parallel_size=tensor_parallel_size,
+                gpu_memory_utilization=single_proc_predictor_util,
+            )
+            talker_model = self.talker_llm.model_runner.model
+            predictor_model = self.predictor_llm.model_runner.model
+            self.text_embedding = talker_model.model.get_text_embeddings()
+            self.input_embedding = talker_model.model.get_input_embeddings()
+            self.text_projection = talker_model.text_projection
+            self.predictor_input_embeddings = predictor_model.model.codec_embedding
 
         self.processor = _get_processor(model_path)
         self._gpu_memory_utilization = gpu_memory_utilization
@@ -589,6 +654,52 @@ class Qwen3TTSInterface:
         
         return normalized
     
+    async def _generate_async_single_process(
+        self,
+        inputs_embeds: torch.Tensor,
+        trailing_text_hiddens: torch.Tensor,
+        tts_pad_embed: torch.Tensor,
+        talker_attention_mask: torch.Tensor,
+        *,
+        request_id: Optional[str],
+        talker_sampling_params: SamplingParams,
+        predictor_sampling_params: SamplingParams,
+    ):
+        """Wrap synchronous generation in a background thread for async consumption."""
+        if self.talker_llm is None or self.predictor_llm is None:
+            raise RuntimeError("Single-process mode requires Talker/Predictor engines to be initialized")
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        req_id = request_id or str(uuid.uuid4())
+
+        def _producer():
+            try:
+                for chunk in self._generate_caller_driven(
+                    inputs_embeds,
+                    trailing_text_hiddens,
+                    tts_pad_embed,
+                    req_id,
+                    talker_sampling_params,
+                    predictor_sampling_params,
+                ):
+                    loop.call_soon_threadsafe(queue.put_nowait, ("data", chunk))
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+                return
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+        threading.Thread(target=_producer, daemon=True).start()
+
+        while True:
+            kind, payload = await queue.get()
+            if kind == "data":
+                yield payload
+            elif kind == "error":
+                raise payload
+            else:  # done
+                break
+
     @torch.inference_mode()
     def extract_speaker_embedding(self, audio: np.ndarray, sr: int) -> torch.Tensor:
         """Extract speaker embedding from audio.
@@ -1114,6 +1225,9 @@ class Qwen3TTSInterface:
     
     async def start_zmq_tasks(self) -> None:
         """Start multiprocess engines (talker + predictor workers) and asyncio orchestrator loops."""
+        if not self._use_mp_engines:
+            logger.info("[interface] single-process mode: start_zmq_tasks() skipped")
+            return
         if self._zmq_tasks_started:
             return
         self._zmq_tasks_started = True
@@ -1140,6 +1254,8 @@ class Qwen3TTSInterface:
 
     async def stop_zmq_tasks(self) -> None:
         """Stop multiprocess engines and orchestrator loops."""
+        if not self._use_mp_engines:
+            return
         if not self._zmq_tasks:
             return
 
@@ -1180,7 +1296,7 @@ class Qwen3TTSInterface:
         self, text: str, language: str = "English", speaker: str = "Vivian"
     ):
         """Async generator of codebook_id chunks. Call await start_zmq_tasks() first."""
-        if not (self._use_mp_engines and self._mp_holder is not None):
+        if self._use_mp_engines and self._mp_holder is None:
             raise RuntimeError("generate_custom_voice_async requires start_zmq_tasks() to be called first")
 
         def _do_prep() -> tuple:
@@ -1224,10 +1340,25 @@ class Qwen3TTSInterface:
         request_id: str | None = None,
     ):
         """Async generator of codebook_id chunks. Call await start_zmq_tasks() first."""
-        if not (self._use_mp_engines and self._mp_holder is not None):
-            raise RuntimeError("generate_async requires start_zmq_tasks() to be called first")
         talker_sampling_params = SamplingParams(temperature=1.0, max_tokens=1)
         predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17)
+        
+        if not self._use_mp_engines:
+            async for chunk in self._generate_async_single_process(
+                inputs_embeds,
+                trailing_text_hiddens,
+                tts_pad_embed,
+                talker_attention_mask,
+                request_id=request_id,
+                talker_sampling_params=talker_sampling_params,
+                predictor_sampling_params=predictor_sampling_params,
+            ):
+                yield chunk
+            return
+        
+        if self._mp_holder is None:
+            raise RuntimeError("generate_async requires start_zmq_tasks() to be called first")
+        
         request_id = request_id or str(uuid.uuid4())
         request_queue: asyncio.Queue = asyncio.Queue()
         async with self._queues_lock:
@@ -1350,8 +1481,9 @@ class Qwen3TTSInterface:
         talker_sampling_params: SamplingParams,
         predictor_sampling_params: SamplingParams,
     ):
-        """Sync generation (not supported when using multiprocess-only interface)."""
-        raise RuntimeError("Sync generation is not supported; use async API (start_zmq_tasks + generate_*_async).")
+        """Sync generation for single-process mode."""
+        if self.talker_llm is None or self.predictor_llm is None:
+            raise RuntimeError("Talker/Predictor engines are not initialized for single-process generation")
 
         generation_step = 0
         next_talker_embeds = inputs_embeds
@@ -1398,6 +1530,8 @@ class Qwen3TTSInterface:
             else:
                 next_talker_embeds = next_talker_embeds + tts_pad_embed
             generation_step += 1
+        
+        self.talker_llm.clear_request(request_id)
 
 
 if __name__ == "__main__":

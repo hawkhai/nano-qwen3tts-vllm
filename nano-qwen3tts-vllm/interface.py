@@ -235,7 +235,7 @@ def _resolve_local_tokenizer_path(model_path: str) -> Optional[str]:
         return env_override
 
     model_dir = Path(model_path).resolve()
-    for candidate in {model_dir.parent / DEFAULT_SPEECH_TOKENIZER_DIRNAME, model_dir / DEFAULT_SPEECH_TOKENIZER_DIRNAME}:
+    for candidate in (model_dir.parent / DEFAULT_SPEECH_TOKENIZER_DIRNAME, model_dir / DEFAULT_SPEECH_TOKENIZER_DIRNAME):
         if candidate.is_dir() and any(candidate.iterdir()):
             return str(candidate)
 
@@ -1027,7 +1027,7 @@ class Qwen3TTSInterface:
                 chunks.append(chunk)
             wavs, sr = interface.speech_tokenizer.decode([{"audio_codes": chunks}])
         """
-        if not (self._use_mp_engines and self._mp_holder is not None):
+        if self._use_mp_engines and self._mp_holder is None:
             raise RuntimeError("generate_voice_clone_async requires start_zmq_tasks() to be called first")
         if language is None:
             language = "Auto"

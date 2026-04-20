@@ -194,18 +194,14 @@ source /data/venv/base/bin/activate
 cd /data/pythonx/
 python3 kremotek.py downcode
 python3 kremotek.py download code_mytts.json removex
-
-cp -a /data/explore/mytts/nano-qwen3tts-vllm/examples/. \
-     /data/nano-qwen3tts-vllm/examples/
-cp -a /data/explore/mytts/nano-qwen3tts-vllm/nano-qwen3tts-vllm/. \
-     /data/nano-qwen3tts-vllm/nano-qwen3tts-vllm/
-
-nvidia-smi
-
-cp -a /data/nano-qwen3tts-vllm/output/. /data/explore/mytts/nano-qwen3tts-vllm/output/ 
-     
-	 
-	 
+  ⏱️  Performance Metrics:
+    Pure Inference Time: 13.595s
+    Decode Time:         0.668s
+    I/O Time:            0.009s
+    Total Time:          14.272s
+    Audio Duration:      38.880s
+    RTF (Real-Time Factor): 0.350x
+    Throughput:          11.2 chars/sec
 	 
 
 
@@ -225,7 +221,7 @@ pip install flash-attn==2.8.3 --no-build-isolation --index-url https://mirrors.a
 
 
 
-
+python examples/custom_voice_example.py   --model-path Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice   --text "人工智能技术的发展日新月异，深度学习模型在语音合成领域取得了突破性进展。现代文本转语音系统能够生成自然流畅的语音，音质接近真人水平。通过大规模预训练和精细调优，这些模型可以准确把握语言的韵律节奏，表达丰富的情感色彩。未来随着算力提升和算法优化，语音合成技术将更加智能高效，为各行各业带来更多创新应用场景。"   --speaker Vivian   --language Chinese
 
 
 

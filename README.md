@@ -202,6 +202,18 @@ python3 kremotek.py download code_mytts.json removex
     Audio Duration:      38.880s
     RTF (Real-Time Factor): 0.350x
     Throughput:          11.2 chars/sec
+
+cp -a /data/explore/mytts/nano-qwen3tts-vllm/examples/. \
+     /data/nano-qwen3tts-vllm/examples/
+cp -a /data/explore/mytts/nano-qwen3tts-vllm/nano-qwen3tts-vllm/. \
+     /data/nano-qwen3tts-vllm/nano-qwen3tts-vllm/
+
+nvidia-smi
+
+cp -a /data/nano-qwen3tts-vllm/output/. /data/explore/mytts/nano-qwen3tts-vllm/output/ 
+     
+	 
+	 
 	 
 
 

@@ -1491,48 +1491,47 @@ class Qwen3TTSInterface:
         if next_talker_embeds.dim() == 2:
             next_talker_embeds = next_talker_embeds.unsqueeze(0)
 
-        while True:
-            self.talker_llm.add_request([next_talker_embeds], talker_sampling_params, request_id=request_id)
-            _, _, outputs_all = self.talker_llm.step_with_outputs()
-            if not outputs_all:
-                self.talker_llm.clear_request(request_id)
-                return
+        try:
+            while True:
+                self.talker_llm.add_request([next_talker_embeds], talker_sampling_params, request_id=request_id)
+                _, _, outputs_all = self.talker_llm.step_with_outputs()
+                if not outputs_all:
+                    return
 
-            match = next((o for o in outputs_all if o[0] == request_id), None)
-            if match is None:
-                continue
-            _, _, token_ids, hidden_states, is_finished = match
-            last_id = token_ids[-1]
-            if last_id == 2150:
-                self.talker_llm.clear_request(request_id)
-                return
+                match = next((o for o in outputs_all if o[0] == request_id), None)
+                if match is None:
+                    continue
+                _, _, token_ids, hidden_states, is_finished = match
+                last_id = token_ids[-1]
+                if last_id == 2150:
+                    return
 
-            last_id_hidden = self.input_embedding(torch.tensor([last_id], device=self.device)).unsqueeze(0)
-            last_hidden_state = hidden_states.unsqueeze(0).unsqueeze(0)
-            predictor_inputs_embeds = torch.cat((last_hidden_state, last_id_hidden), dim=1)
-            predictor_outputs = self.predictor_llm.generate(
-                [predictor_inputs_embeds.unsqueeze(0)],
-                predictor_sampling_params,
-                use_tqdm=False,
-                request_id=request_id,
-            )
-            pred_token_ids = predictor_outputs[0]["token_ids"]
-            codebook_ids = [last_id] + pred_token_ids
-            yield codebook_ids
+                last_id_hidden = self.input_embedding(torch.tensor([last_id], device=self.device)).unsqueeze(0)
+                last_hidden_state = hidden_states.unsqueeze(0).unsqueeze(0)
+                predictor_inputs_embeds = torch.cat((last_hidden_state, last_id_hidden), dim=1)
+                predictor_outputs = self.predictor_llm.generate(
+                    [predictor_inputs_embeds.unsqueeze(0)],
+                    predictor_sampling_params,
+                    use_tqdm=False,
+                    request_id=request_id,
+                )
+                pred_token_ids = predictor_outputs[0]["token_ids"]
+                codebook_ids = [last_id] + pred_token_ids
+                yield codebook_ids
 
-            codec_hiddens = torch.cat(
-                [last_id_hidden]
-                + [self.predictor_input_embeddings[i](torch.tensor([pred_token_ids[i]], device=self.device)).unsqueeze(0) for i in range(15)],
-                dim=1,
-            )
-            next_talker_embeds = codec_hiddens.sum(1, keepdim=True)
-            if generation_step < trailing_text_hiddens.shape[1]:
-                next_talker_embeds = next_talker_embeds + trailing_text_hiddens[:, generation_step].unsqueeze(1)
-            else:
-                next_talker_embeds = next_talker_embeds + tts_pad_embed
-            generation_step += 1
-        
-        self.talker_llm.clear_request(request_id)
+                codec_hiddens = torch.cat(
+                    [last_id_hidden]
+                    + [self.predictor_input_embeddings[i](torch.tensor([pred_token_ids[i]], device=self.device)).unsqueeze(0) for i in range(15)],
+                    dim=1,
+                )
+                next_talker_embeds = codec_hiddens.sum(1, keepdim=True)
+                if generation_step < trailing_text_hiddens.shape[1]:
+                    next_talker_embeds = next_talker_embeds + trailing_text_hiddens[:, generation_step].unsqueeze(1)
+                else:
+                    next_talker_embeds = next_talker_embeds + tts_pad_embed
+                generation_step += 1
+        finally:
+            self.talker_llm.clear_request(request_id)
 
 
 if __name__ == "__main__":
